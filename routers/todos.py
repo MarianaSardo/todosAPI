@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, List
 from fastapi import APIRouter, Depends, Path, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -38,17 +38,25 @@ class TodoRequest(BaseModel):
     completada: bool
 
 
-@router.get("/", status_code=status.HTTP_200_OK)
-async def listado(db: db_dependency):
+class TodosResponse(BaseModel):
+    id: int
+    titulo: str
+    descripcion: str
+    fecha_finalizacion: datetime
+    prioridad: str
+    completada: bool
+
+
+@router.get("/", response_model=List[TodosResponse], status_code=status.HTTP_200_OK)
+async def get_all(db: db_dependency) -> List[TodosResponse]:
     return db.query(Todos).all()
 
 
-@router.get("/{todo_id}", status_code=status.HTTP_200_OK)
-async def get_by_id(db: db_dependency,
-                    todo_id: int = Path(gt=0)):
-    todo_model = db.query(Todos).filter(Todos.id == todo_id).first()
+@router.get("/{id}", response_model=TodosResponse, status_code=status.HTTP_200_OK)
+async def get_by_id(db: db_dependency, id: int = Path(gt=0)) -> TodosResponse:
+    todo_model = db.query(Todos).filter(Todos.id == id).first()
     if todo_model is not None:
-        return todo_model
+        return TodosResponse(**todo_model.__dict__)
     raise HTTPException(status_code=404, detail='ToDo no encontrado.')
 
 
@@ -62,11 +70,11 @@ async def alta(db: db_dependency,  todo_request: TodoRequest):
     db.commit()
     
 
-@router.put("/{todo_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.put("/{id}", status_code=status.HTTP_204_NO_CONTENT)
 async def modificacion(db: db_dependency,
                        todo_request: TodoRequest,
-                       todo_id: int = Path(gt=0)):
-    todo_model = db.query(Todos).filter(Todos.id == todo_id).first()
+                       id: int = Path(gt=0)):
+    todo_model = db.query(Todos).filter(Todos.id == id).first()
     if todo_model is None:
         raise HTTPException(status_code=404, detail='ToDo no encontrado.')
 
@@ -82,8 +90,8 @@ async def modificacion(db: db_dependency,
 
 
 # alta y modif validando la fecha
-@router.post("/alta", status_code=status.HTTP_201_CREATED)
-async def alta(db: db_dependency, todo_request: TodoRequest):
+@router.post("/create", response_model=TodosResponse, status_code=status.HTTP_201_CREATED)
+async def create(db: db_dependency, todo_request: TodoRequest) -> TodosResponse:
     fecha_finalizacion = datetime(
         todo_request.fecha_finalizacion.year,
         todo_request.fecha_finalizacion.month,
@@ -104,48 +112,59 @@ async def alta(db: db_dependency, todo_request: TodoRequest):
     db.add(todo_model)
     db.commit()
 
-    return todo_model
+    todo_response_dict = {
+        'id': todo_model.id,
+        'titulo': todo_model.titulo,
+        'descripcion': todo_model.descripcion,
+        'fecha_finalizacion': todo_model.fecha_finalizacion,
+        'prioridad': todo_model.prioridad,
+        'completada': todo_model.completada,
+    }
+
+    return TodosResponse(**todo_response_dict)
 
 
-@router.put("/{todo_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def modificacion(db: db_dependency,
-                       todo_request: TodoRequest,
-                       todo_id: int = Path(gt=0)):
-    todo_model = db.query(Todos).filter(Todos.id == todo_id).first()
+@router.put("/{id}", status_code=status.HTTP_204_NO_CONTENT)
+async def update(db: db_dependency, todo_request: TodoRequest, id: int = Path(gt=0)) -> None:
+    todo_model = db.query(Todos).filter(Todos.id == id).first()
     if todo_model is None:
         raise HTTPException(status_code=404, detail='ToDo no encontrado.')
+
     fecha_finalizacion = datetime(
         todo_request.fecha_finalizacion.year,
         todo_request.fecha_finalizacion.month,
         todo_request.fecha_finalizacion.day,
     )
+
     if fecha_finalizacion < datetime.now():
         raise HTTPException(status_code=400, detail='La fecha de finalización no puede ser anterior a la fecha actual.')
+
     todo_model.titulo = todo_request.titulo
     todo_model.descripcion = todo_request.descripcion
     todo_model.fecha_finalizacion = fecha_finalizacion
     todo_model.prioridad = todo_request.prioridad
     todo_model.completada = todo_request.completada
+
     db.commit()
 
 
-@router.put("/completada/{todo_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def modificacion_completada(db: db_dependency,
-                                  completada: bool,
-                                  todo_id: int = Path(gt=0)):
-    todo_model = db.query(Todos).filter(Todos.id == todo_id).first()
+@router.put("/update_complete/{id}", status_code=status.HTTP_204_NO_CONTENT)
+async def update_complete(db: db_dependency,
+                          completada: bool,
+                          id: int = Path(gt=0)):
+    todo_model = db.query(Todos).filter(Todos.id == id).first()
     if todo_model is None:
         raise HTTPException(status_code=404, detail='ToDo no encontrado.')
     todo_model.completada = completada
     db.commit()
 
 
-@router.delete("/{todo_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def baja(db: db_dependency,
-               todo_id: int = Path(gt=0)):
-    todo_model = db.query(Todos).filter(Todos.id == todo_id).first()
+@router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete(db: db_dependency,
+                 id: int = Path(gt=0)):
+    todo_model = db.query(Todos).filter(Todos.id == id).first()
 
     if todo_model is None:
         raise HTTPException(status_code=404, detail='ToDo no encontrado.')
-    db.query(Todos).filter(Todos.id == todo_id).delete()
+    db.query(Todos).filter(Todos.id == id).delete()
     db.commit()
